@@ -14,7 +14,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # ⭐ 自动识别并解压 ZIP 文件(保留原始逻辑)
+      # ⭐ 自动识别并解压 ZIP 文件
       - name: Auto-detect and unzip ZIP file
         id: unzip
         run: |
@@ -27,137 +27,94 @@ jobs:
           echo "✅ 找到 ZIP 文件: $ZIP_FILE"
           echo "ZIP_NAME=$ZIP_FILE" >> $GITHUB_OUTPUT
 
-          # 解压(-o 覆盖,-d . 解压到当前目录)
+          # 解压（-o 覆盖，-d . 解压到当前目录）
           unzip -o "$ZIP_FILE" -d .
           echo "✅ 解压完成"
 
-      # 用仓库根目录的 QuantApp.kt 覆盖解压出来的旧文件(如果存在)
+      # 用仓库根目录的 QuantApp.kt 覆盖解压出来的旧文件（如果存在）
       - name: Replace QuantApp.kt if exists
         run: |
           if [ -f ./QuantApp.kt ]; then
-            # 自动查找解压后的 app 源码路径(项目可能嵌套在子目录,不限深度)
-            TARGET=$(find . -path "*/app/src/main/java/com/quant/app/ui/QuantApp.kt" 2>/dev/null | head -1)
+            # 自动查找解压后的 app 源码路径（最多两层）
+            TARGET=$(find . -maxdepth 3 -path "*/app/src/main/java/com/quant/app/ui/QuantApp.kt" 2>/dev/null | head -1)
             if [ -n "$TARGET" ]; then
               cp -v ./QuantApp.kt "$TARGET"
               echo "✅ 已覆盖 $TARGET"
             else
-              echo "⚠️ 未找到目标 QuantApp.kt,跳过覆盖"
+              echo "⚠️ 未找到目标 QuantApp.kt，跳过覆盖"
             fi
           else
-            echo "⚠️ 仓库根目录没有 QuantApp.kt,使用 ZIP 中的原始版本"
+            echo "⚠️ 仓库根目录没有 QuantApp.kt，使用 ZIP 中的原始版本"
           fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
-分布: temurin
-java版: '17'
+          distribution: temurin
+          java-version: '17'
 
-      - 姓名: 安装Android SDK
-uses: android-actions/setup-android@v3
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-      - 姓名: 安装SDK组件
-跑: |
-yes|sdkmanager--licenses>/dev/null||true
-sdkmanager"平台；android-35""构建工具；35.0.0""平台工具"
+      - name: Install SDK components
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
-      - 姓名: 设置渐变
-uses: gradle/操作/设置-gradle@v4
-和……一起:
-gradle-version: '8.9'
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
-      #定位工程根目录并构建调试安装包
-      - 姓名: 生成调试安装包
-身份标识: 建立
-跑: |
-set-e
-#寻找settings.gradle(支持嵌套)
-根=""
-if[-f settings.gradle.kts]||[-f settings.Gradle]；然后
-根="。"
+      # 清理缓存并自动定位工程根目录构建
+      - name: Build Debug APK
+        id: build
+        run: |
+          set -e
+          # 寻找 settings.gradle（支持嵌套）
+          ROOT=""
+          if [ -f settings.gradle.kts ] || [ -f settings.gradle ]; then
+            ROOT="."
           else
             FOUND=$(find . -maxdepth 3 \( -name settings.gradle.kts -o -name settings.gradle \) 2>/dev/null | head -1)
             if [ -n "$FOUND" ]; then
               ROOT=$(dirname "$FOUND")
-Fi
-Fi
-
-如果[-z"$ROOT" ]；然后
-回声"❌ 未找到settings.gradle，请确认ZIP包含安卓工程"
-出口1
-Fi
-
-回显"✅ 工程根目录: $ROOT"
-回声"PROJECT_ROOT=$ROOT">>$GITHUB_ENV
-CD"$ROOT"
-
-          #仅清理工程内构建缓存(保留Gradle依赖缓存，配合设置-梯度加速)
-RM-rf.gradle
-
-          #构建(无gradlew时使用系统Gradle8.9)
-如果[-f./gradlew]；然后
-chmod+x./gradlew
-./gradlew清洁装配调试--stacktrace
-其他
-gradle clean assembly调试--stacktrace
-Fi
-
-      #还原正式签名keystore(4个秘密齐全才启用，否则释放用debug签名兜底)
-      - 姓名: 还原签名密钥库
-env:
-has_KEY: ${{secrets.Keystore_BASE64！='' }}
-has_PWD: ${{secrets.Keystore_password！='' }}
-          HAS_ALIAS: 姓名{{ secrets.KEY_ALIAS != '' }}
-          HAS_KPWD: ${{ secrets.KEY_PASSWORD != '' }}
-        run: |
-          if [ "$HAS_KEY" = "true" ] && [ "$HAS_PWD" = "true" ] && [ "$HAS_ALIAS" = "true" ] && [ "$HAS_KPWD" = "true" ]; then
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "${{ env.PROJECT_ROOT }}/keystore.jks"
-            echo "KEYSTORE_PATH=${{ env.PROJECT_ROOT }}/keystore.jks" >> $GITHUB_ENV
-            echo "✅ 已还原正式签名 keystore"
-          else
-            echo "⚠️ 签名 Secret 未完整配置,Release 将使用 debug 签名"
+            fi
           fi
 
-      # 构建 Release APK(正式签名或 debug 兜底)
-      - name: Build Release APK
-        run: gradle assembleRelease --stacktrace
-        working-directory: ${{ env.PROJECT_ROOT }}
-        env:
-          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-
-      # 收集 APK(Debug 必出,Release 可选)
-      - name: Collect APKs
-        run: |
-          set -e
-          mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          DEBUG_APK=$(find "${{ env.PROJECT_ROOT }}" -path "*/outputs/apk/debug/*.apk" -type f | head -1)
-          RELEASE_APK=$(find "${{ env.PROJECT_ROOT }}" -path "*/outputs/apk/release/*.apk" -type f | head -1)
-          if [ -z "$DEBUG_APK" ]; then
-            echo "❌ 未找到 Debug APK"
+          if [ -z "$ROOT" ]; then
+            echo "❌ 未找到 settings.gradle，请确认 ZIP 包含 Android 工程"
             exit 1
           fi
-          cp "$DEBUG_APK" "$GITHUB_WORKSPACE/artifacts/app-debug.apk"
-          echo "✅ Debug APK: $DEBUG_APK"
-          if [ -n "$RELEASE_APK" ]; then
-            cp "$RELEASE_APK" "$GITHUB_WORKSPACE/artifacts/app-release.apk"
-            echo "✅ Release APK: $RELEASE_APK"
+
+          echo "✅ 工程根目录: $ROOT"
+          cd "$ROOT"
+
+          # 清除 Gradle 缓存
+          rm -rf .gradle
+          rm -rf ~/.gradle/caches/
+
+          # 构建
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew clean assembleDebug --stacktrace --refresh-dependencies
           else
-            echo "⚠️ 未找到 Release APK,跳过"
+            gradle clean assembleDebug --stacktrace --refresh-dependencies
           fi
 
-      - name: Upload Debug APK
+          # 收集 APK
+          APK=$(find . -path "*/outputs/apk/debug/*.apk" -type f | head -1)
+          if [ -z "$APK" ]; then
+            echo "❌ 未找到 APK"
+            exit 1
+          fi
+
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          cp "$APK" "$GITHUB_WORKSPACE/artifacts/app-debug.apk"
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: quant-app-debug
           path: artifacts/app-debug.apk
           if-no-files-found: error
-
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: quant-app-release
-          path: artifacts/app-release.apk
-如果未找到文件：忽略
